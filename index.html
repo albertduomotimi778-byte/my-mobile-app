@@ -2,8 +2,260 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="gameCanvas"></canvas>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Ultimate Dancing Spider</title>
+    <style>
+        :root { --bg: #000000; }
+        body, html { 
+            margin: 0; padding: 0; width: 100vw; height: 100vh; 
+            background: var(--bg); overflow: hidden; 
+            font-family: 'Segoe UI', sans-serif; touch-action: none;
+        }
+        canvas { display: block; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        
+        .ui-overlay {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 100; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px);
+            padding: 10px 20px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; gap: 15px; color: white;
+            box-shadow: 0 0 20px rgba(0,0,0,1);
+        }
+        .upload-btn {
+            background: #fff; color: #000; padding: 8px 16px; border-radius: 20px;
+            cursor: pointer; font-weight: 700; font-size: 12px; transition: 0.3s;
+        }
+        .upload-btn:hover { background: #ff0055; color: #fff; }
+        input[type="file"] { display: none; }
+        #status { font-size: 11px; opacity: 0.7; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-overlay">
+        <label for="music" class="upload-btn">DROP A BEAT</label>
+        <input type="file" id="music" accept="audio/*">
+        <span id="status">Click anywhere to guide the dance</span>
+    </div>
+
+    <canvas id="stage"></canvas>
+    <audio id="player"></audio>
+
+<script>
+/** * UTILITIES 
+ */
+const lerp = (a, b, n) => (1 - n) * a + n * b;
+class Vec2 {
+    constructor(x, y) { this.x = x; this.y = y; }
+    add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+    sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+    mult(n) { return new Vec2(this.x * n, this.y * n); }
+    mag() { return Math.sqrt(this.x**2 + this.y**2); }
+    dist(v) { return this.sub(v).mag(); }
+    heading() { return Math.atan2(this.y, this.x); }
+}
+
+/** * IK LEG LOGIC (FIXED GAIT)
+ */
+class Leg {
+    constructor(bodyOffset, angleOffset, l1, l2, isLeft, bendDir) {
+        this.bodyOffset = bodyOffset; this.angleOffset = angleOffset;
+        this.L1 = l1; this.L2 = l2; this.bendDir = bendDir;
+        this.foot = new Vec2(0,0); this.target = new Vec2(0,0);
+        this.stepping = false; this.stepProgress = 0; this.oldFoot = new Vec2(0,0);
+    }
+
+    updateTarget(bodyPos, bodyHeading, scale, beat) {
+        // Dance Jitter: target moves slightly with the beat
+        const danceJitter = Math.sin(Date.now() * 0.01) * (beat * 30);
+        const totalAngle = bodyHeading + this.angleOffset;
+        const reach = (this.L1 + this.L2) * 0.75 * scale;
+        
+        const attachX = bodyPos.x + Math.cos(bodyHeading) * this.bodyOffset.x - Math.sin(bodyHeading) * this.bodyOffset.y;
+        const attachY = bodyPos.y + Math.sin(bodyHeading) * this.bodyOffset.x + Math.cos(bodyHeading) * this.bodyOffset.y;
+        
+        this.target = new Vec2(
+            attachX + Math.cos(totalAngle) * reach + danceJitter,
+            attachY + Math.sin(totalAngle) * reach + danceJitter
+        );
+        return new Vec2(attachX, attachY);
+    }
+
+    step(speed) {
+        if (!this.stepping) { this.stepping = true; this.stepProgress = 0; this.oldFoot = new Vec2(this.foot.x, this.foot.y); }
+        this.stepProgress += speed;
+        if (this.stepProgress >= 1) { this.stepProgress = 1; this.stepping = false; }
+        this.foot.x = lerp(this.oldFoot.x, this.target.x, this.stepProgress);
+        this.foot.y = lerp(this.oldFoot.y, this.target.y, this.stepProgress);
+    }
+
+    draw(ctx, attachPos, color, beat) {
+        const d = attachPos.dist(this.foot);
+        const angle = this.foot.sub(attachPos).heading();
+        let acosVal = (this.L1**2 + d**2 - this.L2**2) / (2 * this.L1 * d);
+        const jointAngle = Math.acos(Math.max(-1, Math.min(1, acosVal)));
+        const finalAngle = angle + (jointAngle * this.bendDir);
+
+        const joint = new Vec2(attachPos.x + Math.cos(finalAngle) * this.L1, attachPos.y + Math.sin(finalAngle) * this.L1);
+        const lift = Math.sin(this.stepProgress * Math.PI) * (15 + beat * 50);
+
+        ctx.beginPath();
+        ctx.moveTo(attachPos.x, attachPos.y);
+        ctx.quadraticCurveTo(joint.x, joint.y - lift, this.foot.x, this.foot.y);
+        ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke();
+    }
+}
+
+/** * MAIN SPIDER CLASS
+ */
+class Spider {
+    constructor(x, y) {
+        this.pos = new Vec2(x, y); 
+        this.smoothPos = new Vec2(x, y);
+        this.heading = 0;
+        this.hue = 0;
+        this.legs = [
+            { leg: new Leg(new Vec2(12, 8), 0.5, 45, 55, false, -1), group: 0 },
+            { leg: new Leg(new Vec2(8, 12), 1.3, 35, 50, false, -1), group: 1 },
+            { leg: new Leg(new Vec2(2, 12), 1.9, 35, 50, false, 1), group: 0 },
+            { leg: new Leg(new Vec2(-2, 8), 2.7, 45, 55, false, 1), group: 1 },
+            { leg: new Leg(new Vec2(12, -8), -0.5, 45, 55, true, 1), group: 1 },
+            { leg: new Leg(new Vec2(8, -12), -1.3, 35, 50, true, 1), group: 0 },
+            { leg: new Leg(new Vec2(2, -12), -1.9, 35, 50, true, -1), group: 1 },
+            { leg: new Leg(new Vec2(-2, -8), -2.7, 45, 55, true, -1), group: 0 }
+        ];
+        this.legs.forEach(l => l.leg.foot = l.leg.updateTarget(this.pos, this.heading, 1.2, 0));
+    }
+
+    update(target, beat) {
+        this.smoothPos.x = lerp(this.smoothPos.x, target.x, 0.03);
+        this.smoothPos.y = lerp(this.smoothPos.y, target.y, 0.03);
+        
+        const dir = target.sub(this.smoothPos);
+        if (dir.mag() > 5) {
+            let diff = dir.heading() - this.heading;
+            this.heading += Math.atan2(Math.sin(diff), Math.cos(diff)) * 0.06;
+        }
+
+        this.hue = (this.hue + 1 + beat * 10) % 360; // COLOR CHANGE
+
+        const isStepping = this.legs.some(l => l.leg.stepping);
+        // On heavy beats, threshold drops, making legs move frantically
+        const threshold = isStepping ? 100 : (30 - beat * 25); 
+
+        this.legs.forEach(l => {
+            l.leg.updateTarget(this.smoothPos, this.heading, 1.2, beat);
+            if (l.leg.foot.dist(l.leg.target) > threshold) l.leg.step(0.15 + beat * 0.2);
+            if (l.leg.stepping) l.leg.step(0.15 + beat * 0.2);
+        });
+    }
+
+    draw(ctx, beat) {
+        const color = `hsl(${this.hue}, 80%, ${50 + beat * 20}%)`;
+        this.legs.forEach(l => {
+            const attach = l.leg.updateTarget(this.smoothPos, this.heading, 1.2, beat);
+            l.leg.draw(ctx, attach, color, beat);
+        });
+
+        ctx.save();
+        ctx.translate(this.smoothPos.x, this.smoothPos.y);
+        ctx.rotate(this.heading);
+        
+        const danceX = Math.cos(Date.now() * 0.02) * beat * 20;
+        
+        // Abdomen
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.ellipse(-20 + danceX, 0, 25, 18, 0, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+
+        // Cephalothorax
+        ctx.beginPath(); ctx.ellipse(8, 0, 16, 13, 0, 0, Math.PI*2); ctx.fill();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+}
+
+/** * APP INITIALIZATION
+ */
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const audio = document.getElementById('player');
+const input = document.getElementById('music');
+
+let spider, audioCtx, analyser, dataArray;
+let width, height, mouse = new Vec2(0,0), ripples = [];
+
+function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+    if (!spider) spider = new Spider(width/2, height/2);
+}
+
+// Click ripple effect
+const addRipple = (x, y) => ripples.push({ x, y, r: 0, a: 1 });
+
+window.addEventListener('mousedown', e => { 
+    mouse.x = e.clientX; mouse.y = e.clientY; 
+    addRipple(e.clientX, e.clientY);
+});
+window.addEventListener('touchstart', e => { 
+    mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY;
+    addRipple(mouse.x, mouse.y);
+});
+window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+input.onchange = e => {
+    const file = e.target.files[0];
+    if (file) {
+        audio.src = URL.createObjectURL(file);
+        audio.play();
+        if (!audioCtx) {
+            audioCtx = new AudioContext();
+            analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaElementSource(audio);
+            source.connect(analyser); analyser.connect(audioCtx.destination);
+            analyser.fftSize = 64;
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        }
+    }
+};
+
+function loop() {
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, width, height);
+
+    let beat = 0;
+    if (analyser) {
+        analyser.getByteFrequencyData(dataArray);
+        beat = dataArray[0] / 255;
+    }
+
+    // Draw ripples
+    ripples.forEach((r, i) => {
+        r.r += 4; r.a -= 0.02;
+        ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI*2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${r.a})`; ctx.stroke();
+        if (r.a <= 0) ripples.splice(i, 1);
+    });
+
+    spider.update(mouse, beat);
+    spider.draw(ctx, beat);
+    requestAnimationFrame(loop);
+}
+
+window.onresize = resize;
+resize();
+loop();
+</script>
+</body>
+</html>
+  <script src="script.js"></script>
 </body>
 </html>
