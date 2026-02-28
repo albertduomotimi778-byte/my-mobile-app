@@ -1,0 +1,6 @@
+{
+  "appId": "com.visualeditor.mymobileapp",
+  "appName": "my-mobile-app",
+  "webDir": ".",
+  "bundledWebRuntime": false
+}
