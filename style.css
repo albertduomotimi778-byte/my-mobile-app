@@ -1,4 +1,6 @@
-
-body { margin: 0; overflow: hidden; background: #0f0f14; }
-canvas { display: block; touch-action: none; }
-  
+body {
+  font-family: system-ui, sans-serif;
+  padding: 1rem;
+  background: #f0fdf4;
+  color: #166534;
+}
