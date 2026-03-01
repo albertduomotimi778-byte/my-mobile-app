@@ -1,6 +1,86 @@
-body {
-  font-family: system-ui, sans-serif;
-  padding: 1rem;
-  background: #f0fdf4;
-  color: #166534;
+
+body { 
+  margin: 0; 
+  overflow: hidden; 
+  background: #1a1a1a; 
+  width: 100vw;
+  height: 100vh;
+  position: relative;
 }
+
+#device-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #0f0f14;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-sizing: content-box;
+}
+
+#device-frame.mobile {
+  width: 390px;
+  height: 844px;
+  border-radius: 40px;
+  border: 12px solid #000;
+}
+
+#device-frame.desktop {
+  width: 1280px;
+  height: 720px;
+  border-radius: 12px;
+  border: 8px solid #222;
+  border-top-width: 32px;
+}
+
+#device-frame.mobile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 150px;
+  height: 30px;
+  background: #000;
+  border-bottom-left-radius: 20px;
+  border-bottom-right-radius: 20px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+#device-frame.desktop::before {
+  content: '';
+  position: absolute;
+  top: -22px;
+  left: 12px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f56;
+  box-shadow: 20px 0 0 #ffbd2e, 40px 0 0 #27c93f;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+canvas { 
+  display: block; 
+  touch-action: none; 
+  width: 100%; 
+  height: 100%; 
+}
+
+#app-container { 
+  position: absolute; 
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%; 
+  z-index: 10; 
+  pointer-events: none; 
+}
+
+#app-container > * {
+  pointer-events: auto;
+}
+  
